@@ -9,7 +9,7 @@ using JetBrains.Annotations;
 namespace Godot.Utility.Extensions
 {
     /// <summary>
-    /// Contains extension methods for <see cref="Directory"/>.
+    /// Contains extension methods for <see cref="DirAccess"/>.
     /// </summary>
     [PublicAPI]
     public static class DirectoryExtensions
@@ -17,13 +17,13 @@ namespace Godot.Utility.Extensions
         /// <summary>
         /// Copies all files from the directory at <paramref name="from"/> to the directory at <paramref name="to"/>.
         /// </summary>
-        /// <param name="directory">The <see cref="Directory"/> to use when copying files.</param>
+        /// <param name="directory">The <see cref="DirAccess"/> to use when copying files.</param>
         /// <param name="from">The source directory path. It can be an absolute path, or relative to <paramref name="directory"/>.</param>
         /// <param name="to">The destination directory path. It can be an absolute path, or relative to <paramref name="directory"/>.</param>
         /// <param name="recursive">Whether the contents should be copied recursively (i.e. copy files inside subdirectories and so on) or not.</param>
         /// <returns>An array of the paths of all files that were copied from <paramref name="from"/> to <paramref name="to"/>.</returns>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static string[] CopyContents(this Directory directory, string from, string to, bool recursive = false)
+        public static string[] CopyContents(this DirAccess directory, string from, string to, bool recursive = false)
         {
             return directory.CopyContentsLazy(from, to, recursive).ToArray();
         }
@@ -31,72 +31,53 @@ namespace Godot.Utility.Extensions
         /// <summary>
         /// Returns the complete file paths of all files inside <paramref name="directory"/>.
         /// </summary>
-        /// <param name="directory">The <see cref="Directory"/> to search in.</param>
+        /// <param name="directory">The <see cref="DirAccess"/> to search in.</param>
         /// <param name="recursive">Whether the search should be conducted recursively (return paths of files inside <paramref name="directory"/>'s subdirectories and so on) or not.</param>
         /// <returns>An array of the paths of all files inside <paramref name="directory"/>.</returns>
         [MustUseReturnValue]
-        public static string[] GetFiles(this Directory directory, bool recursive = false)
+        public static string[] GetFiles(this DirAccess directory, bool recursive = false, params string[] fileExtensions)
         {
-            return recursive
-                ? directory
-                    .GetDirectories(true)
-                    .SelectMany(path =>
-                    {
-                        using Directory recursiveDirectory = new();
-                        recursiveDirectory.Open(path).Throw();
-                        return recursiveDirectory.GetElementsNonRecursive(true);
-                    })
-                    .Concat(directory.GetElementsNonRecursive(true))
-                    .ToArray()
-                : directory
-                    .GetElementsNonRecursive(true)
-                    .ToArray();
-        }
-        
-        /// <summary>
-        /// Returns the complete file paths of all files inside <paramref name="directory"/> whose extensions match any of <paramref name="fileExtensions"/>.
-        /// </summary>
-        /// <param name="directory">The <see cref="Directory"/> to search in.</param>
-        /// <param name="recursive">Whether the search should be conducted recursively (return paths of files inside <paramref name="directory"/>'s subdirectories and so on) or not.</param>
-        /// <param name="fileExtensions">The file extensions to search for. If none are provided, all file paths are returned.</param>
-        /// <returns>An array of the paths of all files inside <paramref name="directory"/> whose extensions match any of <paramref name="fileExtensions"/>.</returns>
-        [MustUseReturnValue]
-        public static string[] GetFiles(this Directory directory, bool recursive = false, params string[] fileExtensions)
-        {
+            string[] files = recursive
+                ? directory.GetElementsNonRecursive(true).ToArray()
+                : directory.GetElementsNonRecursive(true).ToArray();
+
             return fileExtensions.Any()
-                ? Array.FindAll(directory.GetFiles(recursive), file => fileExtensions.Any(file.EndsWith))
-                : directory.GetFiles(recursive);
+                ? Array.FindAll(files, file => fileExtensions.Any(file.EndsWith))
+                : files;
         }
-        
+
         /// <summary>
         /// Returns the complete directory paths of all directories inside <paramref name="directory"/>.
         /// </summary>
-        /// <param name="directory">The <see cref="Directory"/> to search in.</param>
+        /// <param name="directory">The <see cref="DirAccess"/> to search in.</param>
         /// <param name="recursive">Whether the search should be conducted recursively (return paths of directories inside <paramref name="directory"/>'s subdirectories and so on) or not.</param>
         /// <returns>An array of the paths of all files inside <paramref name="directory"/>.</returns>
         [MustUseReturnValue]
-        public static string[] GetDirectories(this Directory directory, bool recursive = false)
+        public static string[] GetDirectories(this DirAccess dirAccess, bool recursive = false)
         {
             return recursive
-                ? directory
+                ? dirAccess
                     .GetElementsNonRecursive(false)
                     .SelectMany(path =>
                     {
-                        using Directory recursiveDirectory = new();
-                        recursiveDirectory.Open(path).Throw();
-                        return recursiveDirectory
-                            .GetDirectories(true)
-                            .Prepend(path);
+                        DirAccess? recursiveDirAccess = DirAccess.Open(path);
+                        if (recursiveDirAccess == null)
+                        {
+                            throw new InvalidOperationException($"Cannot open directory: {path}");
+                        }
+
+                        return recursiveDirAccess.GetDirectories(true).Prepend(path);
                     })
                     .ToArray()
-                : directory
+                : dirAccess
                     .GetElementsNonRecursive(false)
                     .ToArray();
         }
-        
-        private static IEnumerable<string> GetElementsNonRecursive(this Directory directory, bool trueIfFiles)
+
+
+        private static IEnumerable<string> GetElementsNonRecursive(this DirAccess directory, bool trueIfFiles)
         {
-            directory.ListDirBegin(true).Throw();
+            directory.ListDirBegin();
             while (true)
             {
                 string next = directory.GetNext();
@@ -114,44 +95,68 @@ namespace Godot.Utility.Extensions
             }
         }
         
-        private static IEnumerable<string> CopyContentsLazy(this Directory directory, string from, string to, bool recursive = false)
+        private static IEnumerable<string> CopyContentsLazy(this DirAccess directory, string from, string to, bool recursive = false)
         {
-            directory.Open(from).Throw();
-            
-            // Create destination directory if it doesn't already exist
-            directory.MakeDirRecursive(to).Throw();
-            
-            // Replace only the first instance of the destination directory in file and subdirectory paths using regex (string.Replace() replaces all instances)
-            Regex fromReplacement = new(Regex.Escape(from));
-            
-            // Copy all files inside the source directory non-recursively
-            foreach (string fromFile in directory.GetElementsNonRecursive(true))
+            directory = DirAccess.Open(from);
+            if (directory == null)
             {
+                throw new InvalidOperationException($"Cannot open directory: {from}");
+            }
+
+            DirAccess? dirAccessTo = DirAccess.Open(to);
+            dirAccessTo.MakeDirRecursive(to);
+
+            Regex fromReplacement = new(Regex.Escape(from));
+
+            directory.ListDirBegin();
+            string fromFile;
+            while ((fromFile = directory.GetNext()) != "")
+            {
+                if (directory.CurrentIsDir())
+                {
+                    continue; // Skip directories
+                }
+
                 string toFile = fromReplacement.Replace(fromFile, to, 1);
-                directory.Copy(fromFile, toFile).Throw();
+                CopyFile(fromFile, toFile); // Manual file copy
                 yield return toFile;
             }
-            
+            directory.ListDirEnd();
+
             if (!recursive)
             {
                 yield break;
             }
-            
-            // Copy all files recursively
-            foreach (string fromSubDirectory in directory.GetDirectories(true))
+
+            // Copy files recursively
+            directory.ListDirBegin();
+            while ((fromFile = directory.GetNext()) != "")
             {
-                string toSubDirectory = fromReplacement.Replace(fromSubDirectory, to, 1);
-                directory.MakeDirRecursive(toSubDirectory).Throw();
-                
-                using Directory innerDirectory = new();
-                innerDirectory.Open(fromSubDirectory).Throw();
-                foreach (string fromFile in innerDirectory.GetElementsNonRecursive(true))
+                if (!directory.CurrentIsDir())
                 {
-                    string toFile = fromReplacement.Replace(fromFile, to, 1);
-                    directory.Copy(fromFile, toFile).Throw();
-                    yield return toFile;
+                    continue;
+                }
+
+                string fromSubDir = from + "/" + fromFile;
+                string toSubDir = to + "/" + fromFile;
+                DirAccess? subDirAccess = DirAccess.Open(fromSubDir);
+
+                foreach (string file in subDirAccess.CopyContentsLazy(fromSubDir, toSubDir, true))
+                {
+                    yield return file;
                 }
             }
+            directory.ListDirEnd();
         }
+
+        private static void CopyFile(string fromFile, string toFile)
+        {
+            using FileAccess? srcFile = FileAccess.Open(fromFile, FileAccess.ModeFlags.Read);
+            using FileAccess? destFile = FileAccess.Open(toFile, FileAccess.ModeFlags.Write);
+
+            byte[] buffer = srcFile.GetBuffer((int)srcFile.GetLength());
+            destFile.StoreBuffer(buffer);
+        }
+
     }
 }

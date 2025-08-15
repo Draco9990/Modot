@@ -1,3 +1,9 @@
+
+<div style="padding:10px; margin-top:10px; background-color:#b7d5b6; border-left:5px solid #0F0;">
+<p style="color: #222">This is a fork of Modot made for .net6. It resolves a critical issue with external .dll file loading introduced in Godot 4.</p>
+<p style="color: #222">Uses bitmammoth DirectoryExtension modifications.</p>
+</div>
+
 # Modot
 
 **Modot** is a mod loader for applications made using Godot, inspired heavily by [RimWorld](https://rimworldgame.com)'s mod loading process.

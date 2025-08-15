@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Reflection;
+using System.Runtime.Loader;
 using System.Xml;
 
 using JetBrains.Annotations;
@@ -67,9 +68,20 @@ namespace Godot.Modding
         {
             string assembliesPath = $"{this.Meta.Directory}{System.IO.Path.DirectorySeparatorChar}Assemblies";
             
-            return System.IO.Directory.Exists(assembliesPath)
-                ? System.IO.Directory.GetFiles(assembliesPath, "*dll", SearchOption.AllDirectories).Select(Assembly.LoadFile)
-                : Enumerable.Empty<Assembly>();
+            if(!Directory.Exists(assembliesPath))
+            {
+                return Enumerable.Empty<Assembly>();
+            }
+
+            var alc = AssemblyLoadContext.GetLoadContext(Assembly.GetExecutingAssembly());
+            
+            List<Assembly> assemblies = new();
+            foreach (var file in System.IO.Directory.GetFiles(assembliesPath, "*dll", SearchOption.AllDirectories))
+            {
+                assemblies.Add(alc.LoadFromAssemblyPath(file));
+            }
+
+            return assemblies;
         }
         
         private XmlDocument? LoadData()
